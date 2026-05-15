@@ -19,7 +19,7 @@ interface PropertyGridProps {
 }
 
 type SortKey = "pricePerM2" | "pricePerM2-desc" | "price" | "price-desc" | "area-desc" | "rooms-desc"
-type FilterStatus = "all" | "pending" | "favorite" | "rejected"
+type FilterStatus = "all" | "pending" | "favorite" | "rejected" | "removed"
 
 export function PropertyGrid({ onReset }: PropertyGridProps) {
   const [properties, setProperties] = useState<Property[]>([])
@@ -64,53 +64,27 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
     }
   }, [])
 
-  const saveToServer = useCallback(async (data: Property[]) => {
-    setSaving(true)
-    try {
-      const response = await fetch("/api/properties", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      })
-      const result = await response.json()
-      console.log("[v0] Save response:", result)
-    } catch (error) {
-      console.error("[v0] Error saving:", error)
-    } finally {
-      setSaving(false)
-    }
-  }, [])
-
-  const toggleStatus = (idx: number, status: "favorite" | "rejected") => {
-    const property = properties[idx]
+  const toggleStatus = (id: string, status: "favorite" | "rejected") => {
+    const property = properties.find((p) => p.id === id)
+    if (!property) return
     const newStatus = property.status === status ? "pending" : status
-    
-    setProperties((prev) => {
-      const updated = [...prev]
-      updated[idx] = {
-        ...updated[idx],
-        status: newStatus,
-      }
-      return updated
-    })
-    
-    // Save only this property via PATCH
-    savePropertyUpdate(property.id, { status: newStatus })
+
+    setProperties((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p))
+    )
+
+    savePropertyUpdate(id, { status: newStatus })
   }
 
-  const setNotes = (idx: number, notes: string) => {
-    const property = properties[idx]
-    setProperties((prev) => {
-      const updated = [...prev]
-      updated[idx] = { ...updated[idx], notes }
-      return updated
-    })
-    // Debounce notes save via PATCH
+  const setNotes = (id: string, notes: string) => {
+    setProperties((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, notes } : p))
+    )
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current)
     }
     saveTimeoutRef.current = setTimeout(() => {
-      savePropertyUpdate(property.id, { notes })
+      savePropertyUpdate(id, { notes })
     }, 1000)
   }
 
@@ -255,6 +229,7 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
               <SelectItem value="pending">Pending</SelectItem>
               <SelectItem value="favorite">Favorites</SelectItem>
               <SelectItem value="rejected">Rejected</SelectItem>
+              <SelectItem value="removed">Removed</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -293,8 +268,7 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
 
       {/* Grid */}
       <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {filteredList.map((property, idx) => {
-          const realIdx = properties.indexOf(property)
+        {filteredList.map((property) => {
           const pricePerM2 = property.pricePerM2
           const priceClass =
             pricePerM2 == null
@@ -307,7 +281,7 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
 
           return (
             <div
-              key={property.id || idx}
+              key={property.id}
               className={`overflow-hidden rounded-lg border-2 bg-card transition-all ${
                 property.status === "favorite"
                   ? "border-green-500"
@@ -381,7 +355,7 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
                         ? "bg-green-600 hover:bg-green-700"
                         : ""
                     }
-                    onClick={() => toggleStatus(realIdx, "favorite")}
+                    onClick={() => toggleStatus(property.id, "favorite")}
                   >
                     <Star className="h-4 w-4" />
                   </Button>
@@ -393,7 +367,7 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
                         ? "bg-red-600 hover:bg-red-700"
                         : ""
                     }
-                    onClick={() => toggleStatus(realIdx, "rejected")}
+                    onClick={() => toggleStatus(property.id, "rejected")}
                   >
                     <X className="h-4 w-4" />
                   </Button>
@@ -415,7 +389,7 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
                 <Input
                   placeholder="Notes..."
                   value={property.notes || ""}
-                  onChange={(e) => setNotes(realIdx, e.target.value)}
+                  onChange={(e) => setNotes(property.id, e.target.value)}
                   className="h-8 text-xs"
                 />
               </div>

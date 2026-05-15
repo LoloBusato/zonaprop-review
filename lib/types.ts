@@ -8,6 +8,6 @@ export interface Property {
   url: string | null
   image: string | null
   id: string
-  status: "pending" | "favorite" | "rejected"
+  status: "pending" | "favorite" | "rejected" | "removed"
   notes: string
 }
