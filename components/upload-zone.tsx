@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { Upload, FileUp, AlertCircle } from "lucide-react"
+import { Upload, FileUp, AlertCircle, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 interface UploadZoneProps {
@@ -12,6 +12,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [mergeInfo, setMergeInfo] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleDrop = async (e: React.DragEvent) => {
@@ -34,6 +35,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
 
     setIsUploading(true)
     setError(null)
+    setMergeInfo(null)
 
     try {
       const formData = new FormData()
@@ -44,15 +46,24 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
         body: formData,
       })
 
+      const data = await response.json()
+
       if (!response.ok) {
-        throw new Error("Upload failed")
+        throw new Error(data.details || data.error || "Upload failed")
       }
 
-      onUploadComplete()
-    } catch {
-      setError("Failed to upload file. Please try again.")
+      if (data.kept > 0 || data.removed > 0) {
+        setMergeInfo(
+          `Merged: ${data.count} total — ${data.new} new, ${data.kept} preserved, ${data.removed} removed`
+        )
+      }
+
+      setTimeout(() => onUploadComplete(), 1500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to upload file. Please try again.")
     } finally {
       setIsUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ""
     }
   }
 
@@ -64,7 +75,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
             ZonaProp Review
           </h1>
           <p className="text-sm text-muted-foreground">
-            Upload your propiedades.json file to start reviewing apartments
+            Upload your JSON file to review apartments. Your existing reviews will be preserved.
           </p>
         </div>
 
@@ -111,6 +122,13 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
           <div className="flex items-center justify-center gap-2 text-sm text-destructive">
             <AlertCircle className="h-4 w-4" />
             {error}
+          </div>
+        )}
+
+        {mergeInfo && (
+          <div className="flex items-center justify-center gap-2 text-sm text-green-600">
+            <CheckCircle2 className="h-4 w-4" />
+            {mergeInfo}
           </div>
         )}
 
