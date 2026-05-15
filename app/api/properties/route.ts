@@ -13,7 +13,7 @@ async function getPropertiesBlob(): Promise<{
     console.log("[v0] Found blobs:", blobs.length)
     if (blobs.length > 0) {
       // For private blobs, use get() to read the content
-      const result = await get(blobs[0].pathname, { access: "private" })
+      const result = await get(blobs[0].pathname, { access: "private", useCache: false })
       if (result) {
         const text = await new Response(result.stream).text()
         return { data: JSON.parse(text), pathname: blobs[0].pathname }
