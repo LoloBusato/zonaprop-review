@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import Image from "next/image"
-import { Star, X, ExternalLink, Download, FileDown, Upload } from "lucide-react"
+import { Star, X, ExternalLink, Download, FileDown, LogOut, SlidersHorizontal, Copy, Globe, FileUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -12,22 +12,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { FiltersDialog } from "@/components/filters-dialog"
 import type { Property } from "@/lib/types"
+import { buildSearchUrl, type SearchFilters } from "@/lib/filters"
 
 interface PropertyGridProps {
-  onReset: () => void
+  username: string
+  onLogout: () => void
 }
 
 type SortKey = "pricePerM2" | "pricePerM2-desc" | "price" | "price-desc" | "area-desc" | "rooms-desc"
 type FilterStatus = "all" | "pending" | "favorite" | "rejected" | "removed"
 
-export function PropertyGrid({ onReset }: PropertyGridProps) {
+export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
   const [properties, setProperties] = useState<Property[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("pending")
   const [sortKey, setSortKey] = useState<SortKey>("pricePerM2")
   const [maxPM2, setMaxPM2] = useState(5000)
   const [saving, setSaving] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [scraperUrl, setScraperUrl] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const fetchProperties = useCallback(async () => {
@@ -46,17 +52,23 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
     fetchProperties()
   }, [fetchProperties])
 
+  useEffect(() => {
+    fetch("/api/filters")
+      .then((r) => r.json())
+      .then((data: SearchFilters) => {
+        setScraperUrl(buildSearchUrl(data))
+      })
+      .catch(() => {})
+  }, [])
+
   const savePropertyUpdate = useCallback(async (id: string, update: { status?: string; notes?: string }) => {
     setSaving(true)
-    console.log("[v0] Updating property:", id, update)
     try {
-      const response = await fetch("/api/properties", {
+      await fetch("/api/properties", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, ...update }),
       })
-      const result = await response.json()
-      console.log("[v0] Update response:", result)
     } catch (error) {
       console.error("[v0] Error updating:", error)
     } finally {
@@ -93,7 +105,6 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
       (p) => filterStatus === "all" || p.status === filterStatus
     )
 
-    // Filter out properties over budget
     list = list.filter((p) => !p.pricePerM2 || p.pricePerM2 <= maxPM2)
 
     const desc = sortKey.endsWith("-desc")
@@ -111,18 +122,11 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
   }
 
   const exportCSV = (filter?: "favorite") => {
-    let list = filter
+    const list = filter
       ? properties.filter((p) => p.status === filter)
       : properties
     const headers = [
-      "Status",
-      "Precio USD",
-      "Area m2",
-      "USD/m2",
-      "Ambientes",
-      "Direccion",
-      "Notas",
-      "URL",
+      "Status", "Precio USD", "Area m2", "USD/m2", "Ambientes", "Direccion", "Notas", "URL",
     ]
     const rows = list.map((p) => [
       p.status,
@@ -135,11 +139,46 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
       p.url || "",
     ])
     const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n")
-    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" })
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" })
     const a = document.createElement("a")
     a.href = URL.createObjectURL(blob)
     a.download = `zonaprop_${filter || "all"}_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
+  }
+
+  const handleFiltersApplied = (_filters: SearchFilters, url: string) => {
+    setScraperUrl(url)
+  }
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+      const response = await fetch("/api/upload", { method: "POST", body: formData })
+      const data = await response.json()
+      if (response.ok) {
+        alert(`Upload complete: ${data.count} total — ${data.new} new, ${data.kept} preserved, ${data.removed} removed`)
+        fetchProperties()
+      } else {
+        alert("Upload failed: " + (data.error || "Unknown error"))
+      }
+    } catch {
+      alert("Upload failed")
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  const copyScraperScript = async () => {
+    try {
+      const response = await fetch("/api/scraper-script")
+      const script = await response.text()
+      await navigator.clipboard.writeText(script)
+      alert("Scraper script copied to clipboard! Paste it in the browser console on ZonaProp.")
+    } catch {
+      alert("Failed to copy script. Check console.")
+    }
   }
 
   const favCount = properties.filter((p) => p.status === "favorite").length
@@ -167,22 +206,53 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
           <h1 className="text-lg font-semibold text-foreground">
             ZonaProp Review - {properties.length} properties
           </h1>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               variant="outline"
-              onClick={onReset}
+              onClick={() => setFiltersOpen(true)}
             >
-              <Upload className="mr-1.5 h-4 w-4" />
-              New
+              <SlidersHorizontal className="mr-1.5 h-4 w-4" />
+              Filters
             </Button>
+            {scraperUrl && (
+              <a href={scraperUrl} target="_blank" rel="noopener noreferrer">
+                <Button size="sm" variant="outline">
+                  <Globe className="mr-1.5 h-4 w-4" />
+                  Go to ZonaProp
+                </Button>
+              </a>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={copyScraperScript}
+            >
+              <Copy className="mr-1.5 h-4 w-4" />
+              Copy Scraper
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <FileUp className="mr-1.5 h-4 w-4" />
+              Upload JSON
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
             <Button
               size="sm"
               variant="outline"
               onClick={() => exportCSV()}
             >
               <Download className="mr-1.5 h-4 w-4" />
-              Export CSV
+              CSV
             </Button>
             <Button
               size="sm"
@@ -190,11 +260,16 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
               onClick={() => exportCSV("favorite")}
             >
               <FileDown className="mr-1.5 h-4 w-4" />
-              Export Favorites
+              Favorites
+            </Button>
+            <span className="text-sm text-muted-foreground">{username}</span>
+            <Button variant="ghost" size="sm" onClick={onLogout}>
+              <LogOut className="h-4 w-4" />
             </Button>
           </div>
         </div>
       </header>
+
 
       {/* Summary */}
       <div className="flex flex-wrap gap-4 border-b border-border bg-muted/50 px-4 py-2 text-sm sm:gap-6 sm:px-6">
@@ -328,11 +403,11 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
                   <span>
                     Area:{" "}
                     <strong className="text-foreground">
-                      {property.area ? `${property.area} m\u00b2` : "-"}
+                      {property.area ? `${property.area} m²` : "-"}
                     </strong>
                   </span>
                   <span>
-                    USD/m\u00b2:{" "}
+                    USD/m²:{" "}
                     <strong className={priceClass}>
                       {pricePerM2 ? `USD ${pricePerM2.toLocaleString()}` : "-"}
                     </strong>
@@ -404,6 +479,13 @@ export function PropertyGrid({ onReset }: PropertyGridProps) {
           <p className="text-sm">Try adjusting your filters</p>
         </div>
       )}
+
+      {/* Filters Dialog */}
+      <FiltersDialog
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        onFiltersApplied={handleFiltersApplied}
+      />
     </div>
   )
 }

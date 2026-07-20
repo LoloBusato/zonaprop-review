@@ -1,14 +1,16 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { Upload, FileUp, AlertCircle, CheckCircle2 } from "lucide-react"
+import { Upload, FileUp, AlertCircle, CheckCircle2, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 interface UploadZoneProps {
   onUploadComplete: () => void
+  username: string
+  onLogout: () => void
 }
 
-export function UploadZone({ onUploadComplete }: UploadZoneProps) {
+export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -69,6 +71,13 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-8">
+      <div className="absolute top-4 right-4 flex items-center gap-3">
+        <span className="text-sm text-muted-foreground">{username}</span>
+        <Button variant="ghost" size="sm" onClick={onLogout}>
+          <LogOut className="h-4 w-4" />
+        </Button>
+      </div>
+
       <div className="w-full max-w-md space-y-6 text-center">
         <div className="space-y-2">
           <h1 className="text-2xl font-semibold text-foreground">

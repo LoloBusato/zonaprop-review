@@ -1,17 +1,17 @@
 import { copy, put, list, get } from "@vercel/blob"
 import { NextRequest, NextResponse } from "next/server"
 import type { Property } from "@/lib/types"
-
-const BLOB_FILENAME = "propiedades.json"
+import { getPropertiesBlobName, getBlobPrefix, getAuthenticatedUser } from "@/lib/blob-helpers"
 
 function normalizeUrl(url: string | null | undefined): string {
   if (!url) return ""
   return url.split("?")[0].replace(/\/+$/, "")
 }
 
-async function getExistingBlob(): Promise<{ data: Property[]; url: string | null }> {
+async function getExistingBlob(username: string): Promise<{ data: Property[]; url: string | null }> {
+  const blobName = getPropertiesBlobName(username)
   try {
-    const { blobs } = await list({ prefix: BLOB_FILENAME })
+    const { blobs } = await list({ prefix: blobName })
     if (blobs.length > 0) {
       const blob = blobs[0]
       const result = await get(blob.pathname, { access: "private", useCache: false })
@@ -26,9 +26,9 @@ async function getExistingBlob(): Promise<{ data: Property[]; url: string | null
   return { data: [], url: null }
 }
 
-async function backupBlob(blobUrl: string): Promise<string> {
+async function backupBlob(blobUrl: string, username: string): Promise<string> {
   const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")
-  const backupPathname = `backups/propiedades-${timestamp}.json`
+  const backupPathname = `${getBlobPrefix(username)}backups/propiedades-${timestamp}.json`
   const result = await copy(blobUrl, backupPathname, { access: "private" })
   return result.pathname
 }
@@ -86,6 +86,11 @@ function mergeProperties(
 }
 
 export async function POST(request: NextRequest) {
+  const username = await getAuthenticatedUser()
+  if (!username) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
   try {
     const formData = await request.formData()
     const file = formData.get("file") as File
@@ -101,20 +106,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "JSON must be an array" }, { status: 400 })
     }
 
-    const { data: existing, url: existingUrl } = await getExistingBlob()
+    const { data: existing, url: existingUrl } = await getExistingBlob(username)
 
     if (existingUrl && existing.length > 0) {
-      const backupPath = await backupBlob(existingUrl)
+      const backupPath = await backupBlob(existingUrl, username)
       console.log(`[upload] Backed up existing data to ${backupPath}`)
     }
 
     const merged = mergeProperties(existing, incoming)
 
-    console.log(
-      `[upload] Merge: ${incoming.length} incoming, ${existing.length} existing -> ${merged.length} merged`
-    )
-
-    await put(BLOB_FILENAME, JSON.stringify(merged, null, 2), {
+    const blobName = getPropertiesBlobName(username)
+    await put(blobName, JSON.stringify(merged, null, 2), {
       access: "private",
       addRandomSuffix: false,
       allowOverwrite: true,
