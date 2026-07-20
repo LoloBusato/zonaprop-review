@@ -1,8 +1,10 @@
 "use client"
 
-import { useState, useRef } from "react"
-import { Upload, FileUp, AlertCircle, CheckCircle2, LogOut } from "lucide-react"
+import { useState, useEffect, useRef } from "react"
+import { Upload, FileUp, AlertCircle, CheckCircle2, LogOut, SlidersHorizontal, Globe, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { FiltersDialog } from "@/components/filters-dialog"
+import { buildSearchUrl, type SearchFilters } from "@/lib/filters"
 
 interface UploadZoneProps {
   onUploadComplete: () => void
@@ -15,7 +17,18 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [mergeInfo, setMergeInfo] = useState<string | null>(null)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [scraperUrl, setScraperUrl] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    fetch("/api/filters")
+      .then((r) => r.json())
+      .then((data: SearchFilters) => {
+        setScraperUrl(buildSearchUrl(data))
+      })
+      .catch(() => {})
+  }, [])
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
@@ -69,6 +82,21 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
     }
   }
 
+  const handleFiltersApplied = (_filters: SearchFilters, url: string) => {
+    setScraperUrl(url)
+  }
+
+  const copyScraperScript = async () => {
+    try {
+      const response = await fetch("/api/scraper-script")
+      const script = await response.text()
+      await navigator.clipboard.writeText(script)
+      alert("Scraper script copied to clipboard! Paste it in the browser console on ZonaProp.")
+    } catch {
+      alert("Failed to copy script. Check console.")
+    }
+  }
+
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-8">
       <div className="absolute top-4 right-4 flex items-center gap-3">
@@ -84,10 +112,51 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
             ZonaProp Review
           </h1>
           <p className="text-sm text-muted-foreground">
-            Upload your JSON file to review apartments. Your existing reviews will be preserved.
+            Configure your search filters, scrape properties, and upload the JSON.
           </p>
         </div>
 
+        {/* Action buttons: Filters, Go to ZonaProp, Copy Scraper */}
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setFiltersOpen(true)}
+          >
+            <SlidersHorizontal className="mr-1.5 h-4 w-4" />
+            Change Filters
+          </Button>
+          {scraperUrl && (
+            <a href={scraperUrl} target="_blank" rel="noopener noreferrer">
+              <Button size="sm" variant="outline">
+                <Globe className="mr-1.5 h-4 w-4" />
+                Go to ZonaProp
+              </Button>
+            </a>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={copyScraperScript}
+          >
+            <Copy className="mr-1.5 h-4 w-4" />
+            Copy Scraper
+          </Button>
+        </div>
+
+        {/* Instructions */}
+        <div className="space-y-2 rounded-lg bg-muted p-4 text-left text-xs text-muted-foreground">
+          <p className="font-medium text-foreground">How to get your data:</p>
+          <ol className="list-inside list-decimal space-y-1">
+            <li><strong>Change Filters</strong> to configure your search (barrios, price, area, apto crédito)</li>
+            <li>Click <strong>Go to ZonaProp</strong> to open the search page</li>
+            <li>Click <strong>Copy Scraper</strong> and paste it in the browser console (F12)</li>
+            <li>Wait for it to finish and download <strong>propiedades.json</strong></li>
+            <li>Upload it below</li>
+          </ol>
+        </div>
+
+        {/* Upload zone */}
         <div
           onDragOver={(e) => {
             e.preventDefault()
@@ -141,16 +210,6 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
           </div>
         )}
 
-        <div className="space-y-2 rounded-lg bg-muted p-4 text-left text-xs text-muted-foreground">
-          <p className="font-medium text-foreground">How to get your data:</p>
-          <ol className="list-inside list-decimal space-y-1">
-            <li>Open ZonaProp search results in your browser</li>
-            <li>Run the scraper.js script in the console</li>
-            <li>Download the propiedades.json file</li>
-            <li>Upload it here</li>
-          </ol>
-        </div>
-
         <Button
           variant="outline"
           size="sm"
@@ -160,6 +219,12 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
           Select File
         </Button>
       </div>
+
+      <FiltersDialog
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        onFiltersApplied={handleFiltersApplied}
+      />
     </div>
   )
 }
