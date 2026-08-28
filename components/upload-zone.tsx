@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Upload, FileUp, AlertCircle, CheckCircle2, LogOut, SlidersHorizontal, Globe, Copy } from "lucide-react"
+import { Upload, FileUp, AlertCircle, CheckCircle2, LogOut, SlidersHorizontal, Play, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FiltersDialog } from "@/components/filters-dialog"
 import { buildSearchUrl, type SearchFilters } from "@/lib/filters"
@@ -19,7 +19,10 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
   const [mergeInfo, setMergeInfo] = useState<string | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [scraperUrl, setScraperUrl] = useState<string | null>(null)
+  const [scraping, setScraping] = useState(false)
+  const [scraperMessage, setScraperMessage] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     fetch("/api/filters")
@@ -28,6 +31,12 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
         setScraperUrl(buildSearchUrl(data))
       })
       .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+    }
   }, [])
 
   const handleDrop = async (e: React.DragEvent) => {
@@ -86,15 +95,52 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
     setScraperUrl(url)
   }
 
-  const copyScraperScript = async () => {
+  const runScraper = async () => {
+    setScraping(true)
+    setError(null)
+    setScraperMessage(null)
+
     try {
       const response = await fetch("/api/scraper-script")
       const script = await response.text()
       await navigator.clipboard.writeText(script)
-      alert("Scraper script copied to clipboard! Paste it in the browser console on ZonaProp.")
+
+      if (scraperUrl) {
+        window.open(scraperUrl, "_blank")
+      }
+
+      setScraperMessage("Script copied! Paste it in the browser console on ZonaProp (F12 → Ctrl+V → Enter). Data will sync automatically.")
+
+      startPolling()
     } catch {
-      alert("Failed to copy script. Check console.")
+      setError("Failed to copy scraper script.")
+      setScraping(false)
     }
+  }
+
+  const startPolling = () => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+
+    let checks = 0
+    pollIntervalRef.current = setInterval(async () => {
+      checks++
+      try {
+        const response = await fetch("/api/scraper-status")
+        const data = await response.json()
+        if (data.hasData) {
+          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+          setScraping(false)
+          setScraperMessage(null)
+          onUploadComplete()
+        }
+      } catch {}
+
+      if (checks >= 120) {
+        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+        setScraping(false)
+        setScraperMessage("Polling timed out. If the scraper finished, refresh the page.")
+      }
+    }, 5000)
   }
 
   return (
@@ -112,11 +158,11 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
             ZonaProp Review
           </h1>
           <p className="text-sm text-muted-foreground">
-            Configure your search filters, scrape properties, and upload the JSON.
+            Configure your search filters and run the scraper to load properties.
           </p>
         </div>
 
-        {/* Action buttons: Filters, Go to ZonaProp, Copy Scraper */}
+        {/* Action buttons */}
         <div className="flex flex-wrap justify-center gap-2">
           <Button
             size="sm"
@@ -126,63 +172,63 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
             <SlidersHorizontal className="mr-1.5 h-4 w-4" />
             Change Filters
           </Button>
-          {scraperUrl && (
-            <a href={scraperUrl} target="_blank" rel="noopener noreferrer">
-              <Button size="sm" variant="outline">
-                <Globe className="mr-1.5 h-4 w-4" />
-                Go to ZonaProp
-              </Button>
-            </a>
-          )}
           <Button
-            size="sm"
-            variant="outline"
-            onClick={copyScraperScript}
+            size="default"
+            onClick={runScraper}
+            disabled={scraping}
           >
-            <Copy className="mr-1.5 h-4 w-4" />
-            Copy Scraper
+            {scraping ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="mr-1.5 h-4 w-4" />
+            )}
+            {scraping ? "Waiting for data..." : "Run Scraper"}
           </Button>
         </div>
 
+        {/* Scraper status message */}
+        {scraperMessage && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-left text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
+            {scraperMessage}
+          </div>
+        )}
+
         {/* Instructions */}
         <div className="space-y-2 rounded-lg bg-muted p-4 text-left text-xs text-muted-foreground">
-          <p className="font-medium text-foreground">How to get your data:</p>
+          <p className="font-medium text-foreground">How it works:</p>
           <ol className="list-inside list-decimal space-y-1">
-            <li><strong>Change Filters</strong> to configure your search (barrios, price, area, apto crédito)</li>
-            <li>Click <strong>Go to ZonaProp</strong> to open the search page</li>
-            <li>Click <strong>Copy Scraper</strong> and paste it in the browser console (F12)</li>
-            <li>Wait for it to finish and download <strong>propiedades.json</strong></li>
-            <li>Upload it below</li>
+            <li><strong>Change Filters</strong> to configure your search (barrios, price, area)</li>
+            <li>Click <strong>Run Scraper</strong> — it opens ZonaProp and copies the script</li>
+            <li>Paste the script in the browser console (F12 → Ctrl+V → Enter)</li>
+            <li>Wait for scraping to finish — results sync back automatically</li>
           </ol>
         </div>
 
-        {/* Upload zone */}
-        <div
-          onDragOver={(e) => {
-            e.preventDefault()
-            setIsDragging(true)
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`cursor-pointer rounded-lg border-2 border-dashed p-12 transition-colors ${
-            isDragging
-              ? "border-primary bg-primary/5"
-              : "border-border hover:border-primary/50 hover:bg-muted/50"
-          }`}
-        >
-          <div className="flex flex-col items-center gap-4">
-            {isUploading ? (
-              <FileUp className="h-12 w-12 animate-pulse text-primary" />
-            ) : (
-              <Upload className="h-12 w-12 text-muted-foreground" />
-            )}
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-foreground">
-                {isUploading ? "Uploading..." : "Drop your JSON file here"}
-              </p>
+        {/* Upload zone (fallback) */}
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">Or upload a JSON file manually:</p>
+          <div
+            onDragOver={(e) => {
+              e.preventDefault()
+              setIsDragging(true)
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`cursor-pointer rounded-lg border-2 border-dashed p-8 transition-colors ${
+              isDragging
+                ? "border-primary bg-primary/5"
+                : "border-border hover:border-primary/50 hover:bg-muted/50"
+            }`}
+          >
+            <div className="flex flex-col items-center gap-3">
+              {isUploading ? (
+                <FileUp className="h-8 w-8 animate-pulse text-primary" />
+              ) : (
+                <Upload className="h-8 w-8 text-muted-foreground" />
+              )}
               <p className="text-xs text-muted-foreground">
-                or click to browse
+                {isUploading ? "Uploading..." : "Drop JSON here or click to browse"}
               </p>
             </div>
           </div>
@@ -209,15 +255,6 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
             {mergeInfo}
           </div>
         )}
-
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
-        >
-          Select File
-        </Button>
       </div>
 
       <FiltersDialog

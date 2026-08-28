@@ -5,6 +5,8 @@ export interface Account {
 
 export const ACCOUNTS: Account[] = [
   { username: "LoloBusato", password: "ACM1pt++" },
+  { username: "DaniloBusato", password: "1234" },
+  { username: "Sally", password: "140802"}
 ]
 
 export function validateCredentials(username: string, password: string): Account | null {

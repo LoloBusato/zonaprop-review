@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import Image from "next/image"
-import { Star, X, ExternalLink, Download, FileDown, LogOut, SlidersHorizontal, Copy, Globe, FileUp } from "lucide-react"
+import { Star, X, ExternalLink, Download, FileDown, LogOut, SlidersHorizontal, Play, Loader2, FileUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -33,8 +33,12 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
   const [saving, setSaving] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [scraperUrl, setScraperUrl] = useState<string | null>(null)
+  const [scraping, setScraping] = useState(false)
+  const [scraperMessage, setScraperMessage] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastPropertyCountRef = useRef<number>(0)
 
   const fetchProperties = useCallback(async () => {
     try {
@@ -51,6 +55,16 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
   useEffect(() => {
     fetchProperties()
   }, [fetchProperties])
+
+  useEffect(() => {
+    lastPropertyCountRef.current = properties.length
+  }, [properties.length])
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     fetch("/api/filters")
@@ -150,6 +164,54 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
     setScraperUrl(url)
   }
 
+  const runScraper = async () => {
+    setScraping(true)
+    setScraperMessage(null)
+
+    try {
+      const response = await fetch("/api/scraper-script")
+      const script = await response.text()
+      await navigator.clipboard.writeText(script)
+
+      if (scraperUrl) {
+        window.open(scraperUrl, "_blank")
+      }
+
+      setScraperMessage("Script copied! Paste in console (F12 → Ctrl+V → Enter). Data syncs automatically.")
+
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+      let checks = 0
+      const initialCount = lastPropertyCountRef.current
+      pollIntervalRef.current = setInterval(async () => {
+        checks++
+        try {
+          const resp = await fetch("/api/scraper-status")
+          const data = await resp.json()
+          if (data.hasData && data.size > 0) {
+            const propsResp = await fetch("/api/properties")
+            const propsData = await propsResp.json()
+            if (Array.isArray(propsData) && propsData.length > initialCount) {
+              if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+              setProperties(propsData)
+              setScraping(false)
+              setScraperMessage(`Done! ${propsData.length - initialCount} new properties added.`)
+              setTimeout(() => setScraperMessage(null), 5000)
+            }
+          }
+        } catch {}
+        if (checks >= 120) {
+          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+          setScraping(false)
+          setScraperMessage("Polling timed out. Refresh the page if scraper finished.")
+          setTimeout(() => setScraperMessage(null), 8000)
+        }
+      }, 5000)
+    } catch {
+      setScraping(false)
+      setScraperMessage("Failed to copy scraper script.")
+    }
+  }
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -170,16 +232,6 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-  const copyScraperScript = async () => {
-    try {
-      const response = await fetch("/api/scraper-script")
-      const script = await response.text()
-      await navigator.clipboard.writeText(script)
-      alert("Scraper script copied to clipboard! Paste it in the browser console on ZonaProp.")
-    } catch {
-      alert("Failed to copy script. Check console.")
-    }
-  }
 
   const favCount = properties.filter((p) => p.status === "favorite").length
   const rejCount = properties.filter((p) => p.status === "rejected").length
@@ -215,21 +267,17 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
               <SlidersHorizontal className="mr-1.5 h-4 w-4" />
               Filters
             </Button>
-            {scraperUrl && (
-              <a href={scraperUrl} target="_blank" rel="noopener noreferrer">
-                <Button size="sm" variant="outline">
-                  <Globe className="mr-1.5 h-4 w-4" />
-                  Go to ZonaProp
-                </Button>
-              </a>
-            )}
             <Button
               size="sm"
-              variant="outline"
-              onClick={copyScraperScript}
+              onClick={runScraper}
+              disabled={scraping}
             >
-              <Copy className="mr-1.5 h-4 w-4" />
-              Copy Scraper
+              {scraping ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="mr-1.5 h-4 w-4" />
+              )}
+              {scraping ? "Scraping..." : "Run Scraper"}
             </Button>
             <Button
               size="sm"
@@ -270,6 +318,13 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
         </div>
       </header>
 
+
+      {/* Scraper status message */}
+      {scraperMessage && (
+        <div className="border-b border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
+          {scraperMessage}
+        </div>
+      )}
 
       {/* Summary */}
       <div className="flex flex-wrap gap-4 border-b border-border bg-muted/50 px-4 py-2 text-sm sm:gap-6 sm:px-6">

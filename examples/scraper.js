@@ -134,13 +134,40 @@
 
     // Fetch remaining pages
     let stalePages = 0;
+    let retries = 0;
+    const MAX_RETRIES = 3;
     for (let page = 2; page <= totalPages; page++) {
       const pageUrl = buildPageUrl(page);
       updateProgress(`Scraping page ${page}/${totalPages}... (${allResults.size} unique)`, page / totalPages * 100);
       try {
         const prevSize = allResults.size;
         const resp = await fetch(pageUrl);
+        if (resp.status === 403 || resp.status === 429) {
+          retries++;
+          if (retries > MAX_RETRIES) {
+            console.warn(`[ZPF] Max retries reached on page ${page}. Stopping.`);
+            break;
+          }
+          console.warn(`[ZPF] Blocked on page ${page} (status ${resp.status}). Retry ${retries}/${MAX_RETRIES}, waiting 45s...`);
+          updateProgress(`Blocked by Cloudflare, waiting 45s (retry ${retries}/${MAX_RETRIES})...`, page / totalPages * 100);
+          await new Promise(r => setTimeout(r, 45000));
+          page--;
+          continue;
+        }
         const html = await resp.text();
+        if (html.includes("challenge-platform") || html.includes("Just a moment")) {
+          retries++;
+          if (retries > MAX_RETRIES) {
+            console.warn(`[ZPF] Max retries reached on page ${page}. Stopping.`);
+            break;
+          }
+          console.warn(`[ZPF] Cloudflare challenge on page ${page}. Retry ${retries}/${MAX_RETRIES}, waiting 45s...`);
+          updateProgress(`Cloudflare challenge, waiting 45s (retry ${retries}/${MAX_RETRIES})...`, page / totalPages * 100);
+          await new Promise(r => setTimeout(r, 45000));
+          page--;
+          continue;
+        }
+        retries = 0;
         const doc = new DOMParser().parseFromString(html, "text/html");
 
         const pageResults = extractFromDoc(doc);
@@ -160,7 +187,7 @@
           stalePages = 0;
         }
 
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
       } catch (e) {
         console.error(`[ZPF] Error on page ${page}:`, e);
       }

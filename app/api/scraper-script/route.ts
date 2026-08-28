@@ -1,12 +1,18 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { getFiltersBlobName, getAuthenticatedUser } from "@/lib/blob-helpers"
 import { list, get } from "@vercel/blob"
 import { buildSearchUrl, DEFAULT_FILTERS, type SearchFilters } from "@/lib/filters"
+import { ACCOUNTS } from "@/lib/accounts"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const username = await getAuthenticatedUser()
   if (!username) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const account = ACCOUNTS.find(a => a.username === username)
+  if (!account) {
+    return NextResponse.json({ error: "Account not found" }, { status: 404 })
   }
 
   let filters: SearchFilters = DEFAULT_FILTERS
@@ -22,20 +28,25 @@ export async function GET() {
     }
   } catch {}
 
-  const url = buildSearchUrl(filters)
+  const searchUrl = buildSearchUrl(filters)
 
-  const script = generateScraperScript(url)
+  const origin = request.nextUrl.origin
+  const authToken = btoa(`${account.username}:${account.password}`)
+
+  const script = generateScraperScript(searchUrl, origin, authToken)
   return new NextResponse(script, {
     headers: { "Content-Type": "application/javascript" },
   })
 }
 
-function generateScraperScript(baseUrl: string): string {
+function generateScraperScript(baseUrl: string, appOrigin: string, authToken: string): string {
   return `(function () {
   "use strict";
 
   const STORAGE_KEY = "zpf-scraper-data";
   const BASE_URL = ${JSON.stringify(baseUrl)};
+  const APP_ORIGIN = ${JSON.stringify(appOrigin)};
+  const AUTH_TOKEN = ${JSON.stringify(authToken)};
 
   function parsePrice(text) {
     const patterns = [
@@ -141,7 +152,7 @@ function generateScraperScript(baseUrl: string): string {
     const MAX_RETRIES = 3;
     for (let page = 2; page <= totalPages; page++) {
       const pageUrl = buildPageUrl(page);
-      updateProgress("Scraping page " + page + "/" + totalPages + "... (" + allResults.size + " unique)", page / totalPages * 100);
+      updateProgress("Scraping page " + page + "... (" + allResults.size + " unique)", page / totalPages * 100);
       try {
         const prevSize = allResults.size;
         const resp = await fetch(pageUrl);
@@ -177,6 +188,29 @@ function generateScraperScript(baseUrl: string): string {
     return Array.from(allResults.values()).map(r => ({ ...r, id: r.url, status: "pending", notes: "" }));
   }
 
+  async function uploadResults(results) {
+    updateProgress("Uploading " + results.length + " properties to app...", 98);
+    try {
+      const response = await fetch(APP_ORIGIN + "/api/upload-scraper", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Basic " + AUTH_TOKEN,
+        },
+        body: JSON.stringify(results),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        return data;
+      } else {
+        throw new Error(data.error || "Upload failed with status " + response.status);
+      }
+    } catch (e) {
+      console.error("[ZPF] Upload error:", e);
+      throw e;
+    }
+  }
+
   function showProgress() {
     let el = document.getElementById("zpf-progress-overlay");
     if (!el) {
@@ -200,40 +234,31 @@ function generateScraperScript(baseUrl: string): string {
     if (el) el.remove();
   }
 
-  function downloadJSON(data) {
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "propiedades.json";
-    a.click();
-    console.log("[ZPF] Downloaded propiedades.json with " + data.length + " properties");
-  }
-
   async function main() {
     showProgress();
     updateProgress("Analyzing page...", 5);
     const results = await scrapeAllPages();
-    hideProgress();
 
     if (results.length === 0) {
+      hideProgress();
       alert("No se encontraron propiedades. Revisa la consola para mas info.");
       return;
     }
 
-    let existing = [];
-    try { existing = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch {}
-    const existingMap = new Map(existing.map(p => [p.id, p]));
-    results.forEach(r => {
-      if (existingMap.has(r.id)) {
-        r.status = existingMap.get(r.id).status || "pending";
-        r.notes = existingMap.get(r.id).notes || "";
-      }
-    });
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(results));
-    downloadJSON(results);
-    alert("Listo! " + results.length + " propiedades guardadas.\\nSe descargo propiedades.json.\\n\\nSubi el archivo en la app para actualizar.");
+    try {
+      const data = await uploadResults(results);
+      hideProgress();
+      alert("Listo! " + results.length + " propiedades scraped.\\n" + data.added + " new, " + data.updated + " updated.\\nTotal in app: " + data.total + "\\n\\nYou can close this tab and go back to the app.");
+    } catch (e) {
+      hideProgress();
+      alert("Error uploading results: " + e.message + "\\n\\nFalling back to JSON download...");
+      const json = JSON.stringify(results, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "propiedades.json";
+      a.click();
+    }
   }
 
   main();
