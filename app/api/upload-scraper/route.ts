@@ -35,10 +35,12 @@ function additiveMerge(existing: Property[], incoming: Record<string, unknown>[]
 
   let added = 0
   let updated = 0
+  const seen = new Set<string>()
 
   for (const raw of incoming) {
     const cleanUrl = normalizeUrl(raw.url as string)
-    if (!cleanUrl) continue
+    if (!cleanUrl || seen.has(cleanUrl)) continue
+    seen.add(cleanUrl)
 
     const old = existingByUrl.get(cleanUrl)
     if (old) {

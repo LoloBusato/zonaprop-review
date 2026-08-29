@@ -9,6 +9,7 @@ export default function Home() {
   const [username, setUsername] = useState<string | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [hasData, setHasData] = useState<boolean | null>(null)
+  const [showScraper, setShowScraper] = useState(false)
 
   useEffect(() => {
     fetch("/api/auth")
@@ -29,6 +30,7 @@ export default function Home() {
       }
       const data = await response.json()
       setHasData(Array.isArray(data) && data.length > 0)
+      setShowScraper(false)
     } catch {
       setHasData(false)
     }
@@ -42,6 +44,7 @@ export default function Home() {
     await fetch("/api/auth", { method: "DELETE" })
     setUsername(null)
     setHasData(null)
+    setShowScraper(false)
   }
 
   if (authLoading) {
@@ -64,9 +67,9 @@ export default function Home() {
     )
   }
 
-  if (!hasData) {
+  if (!hasData || showScraper) {
     return <UploadZone onUploadComplete={checkForData} username={username} onLogout={handleLogout} />
   }
 
-  return <PropertyGrid username={username} onLogout={handleLogout} />
+  return <PropertyGrid username={username} onLogout={handleLogout} onGoToScraper={() => setShowScraper(true)} />
 }

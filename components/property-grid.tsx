@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import Image from "next/image"
-import { Star, X, ExternalLink, Download, FileDown, LogOut, SlidersHorizontal, Play, Loader2, FileUp } from "lucide-react"
+import { Star, X, ExternalLink, Download, FileDown, LogOut, SlidersHorizontal, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -12,19 +12,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { FiltersDialog } from "@/components/filters-dialog"
 import type { Property } from "@/lib/types"
-import { buildSearchUrl, type SearchFilters } from "@/lib/filters"
 
 interface PropertyGridProps {
   username: string
   onLogout: () => void
+  onGoToScraper: () => void
 }
 
 type SortKey = "pricePerM2" | "pricePerM2-desc" | "price" | "price-desc" | "area-desc" | "rooms-desc"
 type FilterStatus = "all" | "pending" | "favorite" | "rejected" | "removed"
 
-export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
+const PAGE_SIZE = 50
+
+export function PropertyGrid({ username, onLogout, onGoToScraper }: PropertyGridProps) {
   const [properties, setProperties] = useState<Property[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("pending")
@@ -34,15 +35,9 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
   const [filterMinPrice, setFilterMinPrice] = useState<number | null>(null)
   const [filterMinArea, setFilterMinArea] = useState<number | null>(null)
   const [filterMaxArea, setFilterMaxArea] = useState<number | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
   const [saving, setSaving] = useState(false)
-  const [filtersOpen, setFiltersOpen] = useState(false)
-  const [scraperUrl, setScraperUrl] = useState<string | null>(null)
-  const [scraping, setScraping] = useState(false)
-  const [scraperMessage, setScraperMessage] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const lastPropertyCountRef = useRef<number>(0)
 
   const fetchProperties = useCallback(async () => {
     try {
@@ -61,23 +56,9 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
   }, [fetchProperties])
 
   useEffect(() => {
-    lastPropertyCountRef.current = properties.length
-  }, [properties.length])
+    setCurrentPage(1)
+  }, [filterStatus, sortKey, maxPM2, filterMaxPrice, filterMinPrice, filterMinArea, filterMaxArea])
 
-  useEffect(() => {
-    return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetch("/api/filters")
-      .then((r) => r.json())
-      .then((data: SearchFilters) => {
-        setScraperUrl(buildSearchUrl(data))
-      })
-      .catch(() => {})
-  }, [])
 
   const savePropertyUpdate = useCallback(async (id: string, update: { status?: string; notes?: string; price?: number | null; area?: number | null }) => {
     setSaving(true)
@@ -205,82 +186,6 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
     a.click()
   }
 
-  const handleFiltersApplied = (_filters: SearchFilters, url: string) => {
-    setScraperUrl(url)
-  }
-
-  const runScraper = async () => {
-    setScraping(true)
-    setScraperMessage(null)
-
-    try {
-      const [scriptResponse, filtersResponse] = await Promise.all([
-        fetch("/api/scraper-script"),
-        fetch("/api/filters"),
-      ])
-      const script = await scriptResponse.text()
-      await navigator.clipboard.writeText(script)
-
-      const filtersData: SearchFilters = await filtersResponse.json()
-      const freshUrl = buildSearchUrl(filtersData)
-      setScraperUrl(freshUrl)
-      window.open(freshUrl, "_blank")
-
-      setScraperMessage("Script copied! Paste in console (F12 → Ctrl+V → Enter). Data syncs automatically.")
-
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
-      let checks = 0
-      const initialCount = lastPropertyCountRef.current
-      pollIntervalRef.current = setInterval(async () => {
-        checks++
-        try {
-          const resp = await fetch("/api/scraper-status")
-          const data = await resp.json()
-          if (data.hasData && data.size > 0) {
-            const propsResp = await fetch("/api/properties")
-            const propsData = await propsResp.json()
-            if (Array.isArray(propsData) && propsData.length > initialCount) {
-              if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
-              setProperties(propsData)
-              setScraping(false)
-              setScraperMessage(`Done! ${propsData.length - initialCount} new properties added.`)
-              setTimeout(() => setScraperMessage(null), 5000)
-            }
-          }
-        } catch {}
-        if (checks >= 120) {
-          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
-          setScraping(false)
-          setScraperMessage("Polling timed out. Refresh the page if scraper finished.")
-          setTimeout(() => setScraperMessage(null), 8000)
-        }
-      }, 5000)
-    } catch {
-      setScraping(false)
-      setScraperMessage("Failed to copy scraper script.")
-    }
-  }
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    try {
-      const formData = new FormData()
-      formData.append("file", file)
-      const response = await fetch("/api/upload", { method: "POST", body: formData })
-      const data = await response.json()
-      if (response.ok) {
-        alert(`Upload complete: ${data.count} total — ${data.new} new, ${data.kept} preserved, ${data.removed} removed`)
-        fetchProperties()
-      } else {
-        alert("Upload failed: " + (data.error || "Unknown error"))
-      }
-    } catch {
-      alert("Upload failed")
-    }
-    if (fileInputRef.current) fileInputRef.current.value = ""
-  }
-
 
   const favCount = properties.filter((p) => p.status === "favorite").length
   const rejCount = properties.filter((p) => p.status === "rejected").length
@@ -290,6 +195,9 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
     : 0
 
   const filteredList = getFilteredAndSorted()
+  const totalPages = Math.ceil(filteredList.length / PAGE_SIZE)
+  const safeCurrentPage = Math.min(currentPage, totalPages || 1)
+  const paginatedList = filteredList.slice((safeCurrentPage - 1) * PAGE_SIZE, safeCurrentPage * PAGE_SIZE)
 
   if (loading) {
     return (
@@ -310,39 +218,11 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
-              variant="outline"
-              onClick={() => setFiltersOpen(true)}
+              onClick={onGoToScraper}
             >
               <SlidersHorizontal className="mr-1.5 h-4 w-4" />
-              Filters
+              Run Scraper
             </Button>
-            <Button
-              size="sm"
-              onClick={runScraper}
-              disabled={scraping}
-            >
-              {scraping ? (
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="mr-1.5 h-4 w-4" />
-              )}
-              {scraping ? "Scraping..." : "Run Scraper"}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <FileUp className="mr-1.5 h-4 w-4" />
-              Upload JSON
-            </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={handleFileUpload}
-              className="hidden"
-            />
             <Button
               size="sm"
               variant="outline"
@@ -367,13 +247,6 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
         </div>
       </header>
 
-
-      {/* Scraper status message */}
-      {scraperMessage && (
-        <div className="border-b border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
-          {scraperMessage}
-        </div>
-      )}
 
       {/* Summary */}
       <div className="flex flex-wrap gap-4 border-b border-border bg-muted/50 px-4 py-2 text-sm sm:gap-6 sm:px-6">
@@ -479,13 +352,13 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
         </div>
 
         <span className="ml-auto text-sm text-muted-foreground">
-          Showing {filteredList.length}
+          {filteredList.length} results
         </span>
       </div>
 
       {/* Grid */}
       <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {filteredList.map((property) => {
+        {paginatedList.map((property) => {
           const pricePerM2 = property.pricePerM2
           const priceClass =
             pricePerM2 == null
@@ -628,12 +501,31 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
         </div>
       )}
 
-      {/* Filters Dialog */}
-      <FiltersDialog
-        open={filtersOpen}
-        onOpenChange={setFiltersOpen}
-        onFiltersApplied={handleFiltersApplied}
-      />
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="sticky bottom-0 flex items-center justify-center gap-4 border-t border-border bg-card px-4 py-3">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={safeCurrentPage <= 1}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Page {safeCurrentPage} of {totalPages}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            disabled={safeCurrentPage >= totalPages}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
     </div>
   )
 }
