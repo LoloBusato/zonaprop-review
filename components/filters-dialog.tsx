@@ -72,8 +72,6 @@ export function FiltersDialog({ open, onOpenChange, onFiltersApplied }: FiltersD
     }
   }
 
-  const generatedUrl = buildSearchUrl(filters)
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh]">
@@ -199,13 +197,6 @@ export function FiltersDialog({ open, onOpenChange, onFiltersApplied }: FiltersD
               </ScrollArea>
             </div>
 
-            {/* Generated URL preview */}
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Generated scraper URL:</Label>
-              <p className="text-xs break-all rounded bg-muted p-2 font-mono">
-                {generatedUrl}
-              </p>
-            </div>
           </div>
         )}
 
@@ -214,7 +205,7 @@ export function FiltersDialog({ open, onOpenChange, onFiltersApplied }: FiltersD
             Cancel
           </Button>
           <Button onClick={handleApply} disabled={saving || loading}>
-            {saving ? "Saving..." : "Apply & Generate Script"}
+            {saving ? "Saving..." : "OK"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -30,6 +30,10 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("pending")
   const [sortKey, setSortKey] = useState<SortKey>("pricePerM2")
   const [maxPM2, setMaxPM2] = useState(5000)
+  const [filterMaxPrice, setFilterMaxPrice] = useState<number | null>(null)
+  const [filterMinPrice, setFilterMinPrice] = useState<number | null>(null)
+  const [filterMinArea, setFilterMinArea] = useState<number | null>(null)
+  const [filterMaxArea, setFilterMaxArea] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [scraperUrl, setScraperUrl] = useState<string | null>(null)
@@ -75,7 +79,7 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
       .catch(() => {})
   }, [])
 
-  const savePropertyUpdate = useCallback(async (id: string, update: { status?: string; notes?: string }) => {
+  const savePropertyUpdate = useCallback(async (id: string, update: { status?: string; notes?: string; price?: number | null; area?: number | null }) => {
     setSaving(true)
     try {
       await fetch("/api/properties", {
@@ -114,12 +118,53 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
     }, 1000)
   }
 
+  const setPrice = (id: string, price: number | null) => {
+    setProperties((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p
+        const pricePerM2 = price && p.area ? Math.round(price / p.area) : null
+        return { ...p, price, pricePerM2 }
+      })
+    )
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+    saveTimeoutRef.current = setTimeout(() => {
+      savePropertyUpdate(id, { price })
+    }, 1000)
+  }
+
+  const setArea = (id: string, area: number | null) => {
+    setProperties((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p
+        const pricePerM2 = p.price && area ? Math.round(p.price / area) : null
+        return { ...p, area, pricePerM2 }
+      })
+    )
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+    saveTimeoutRef.current = setTimeout(() => {
+      savePropertyUpdate(id, { area })
+    }, 1000)
+  }
+
   const getFilteredAndSorted = () => {
     let list = properties.filter(
       (p) => filterStatus === "all" || p.status === filterStatus
     )
 
     list = list.filter((p) => !p.pricePerM2 || p.pricePerM2 <= maxPM2)
+
+    if (filterMaxPrice) {
+      list = list.filter((p) => !p.price || p.price <= filterMaxPrice)
+    }
+    if (filterMinPrice) {
+      list = list.filter((p) => !p.price || p.price >= filterMinPrice)
+    }
+    if (filterMinArea) {
+      list = list.filter((p) => !p.area || p.area >= filterMinArea)
+    }
+    if (filterMaxArea) {
+      list = list.filter((p) => !p.area || p.area <= filterMaxArea)
+    }
 
     const desc = sortKey.endsWith("-desc")
     const key = sortKey.replace("-desc", "") as keyof Property
@@ -169,13 +214,17 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
     setScraperMessage(null)
 
     try {
-      const response = await fetch("/api/scraper-script")
-      const script = await response.text()
+      const [scriptResponse, filtersResponse] = await Promise.all([
+        fetch("/api/scraper-script"),
+        fetch("/api/filters"),
+      ])
+      const script = await scriptResponse.text()
       await navigator.clipboard.writeText(script)
 
-      if (scraperUrl) {
-        window.open(scraperUrl, "_blank")
-      }
+      const filtersData: SearchFilters = await filtersResponse.json()
+      const freshUrl = buildSearchUrl(filtersData)
+      setScraperUrl(freshUrl)
+      window.open(freshUrl, "_blank")
 
       setScraperMessage("Script copied! Paste in console (F12 → Ctrl+V → Enter). Data syncs automatically.")
 
@@ -391,6 +440,44 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
           />
         </div>
 
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Price:</span>
+          <Input
+            type="number"
+            placeholder="Min"
+            value={filterMinPrice ?? ""}
+            onChange={(e) => setFilterMinPrice(e.target.value ? parseInt(e.target.value) : null)}
+            className="h-8 w-[80px]"
+          />
+          <span className="text-xs text-muted-foreground">-</span>
+          <Input
+            type="number"
+            placeholder="Max"
+            value={filterMaxPrice ?? ""}
+            onChange={(e) => setFilterMaxPrice(e.target.value ? parseInt(e.target.value) : null)}
+            className="h-8 w-[80px]"
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Area:</span>
+          <Input
+            type="number"
+            placeholder="Min"
+            value={filterMinArea ?? ""}
+            onChange={(e) => setFilterMinArea(e.target.value ? parseInt(e.target.value) : null)}
+            className="h-8 w-[70px]"
+          />
+          <span className="text-xs text-muted-foreground">-</span>
+          <Input
+            type="number"
+            placeholder="Max"
+            value={filterMaxArea ?? ""}
+            onChange={(e) => setFilterMaxArea(e.target.value ? parseInt(e.target.value) : null)}
+            className="h-8 w-[70px]"
+          />
+        </div>
+
         <span className="ml-auto text-sm text-muted-foreground">
           Showing {filteredList.length}
         </span>
@@ -446,25 +533,31 @@ export function PropertyGrid({ username, onLogout }: PropertyGridProps) {
                   {property.address || "No address"}
                 </p>
 
-                <div className="grid grid-cols-2 gap-1 text-xs text-muted-foreground">
-                  <span>
-                    Price:{" "}
-                    <strong className="text-foreground">
-                      {property.price
-                        ? `USD ${property.price.toLocaleString()}`
-                        : "-"}
-                    </strong>
-                  </span>
-                  <span>
-                    Area:{" "}
-                    <strong className="text-foreground">
-                      {property.area ? `${property.area} m²` : "-"}
-                    </strong>
-                  </span>
+                <div className="grid grid-cols-2 gap-1.5 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-1">
+                    <span>USD</span>
+                    <Input
+                      type="number"
+                      value={property.price ?? ""}
+                      onChange={(e) => setPrice(property.id, e.target.value ? parseInt(e.target.value) : null)}
+                      className="h-6 w-full text-xs px-1"
+                      placeholder="-"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span>m²</span>
+                    <Input
+                      type="number"
+                      value={property.area ?? ""}
+                      onChange={(e) => setArea(property.id, e.target.value ? parseFloat(e.target.value) : null)}
+                      className="h-6 w-full text-xs px-1"
+                      placeholder="-"
+                    />
+                  </div>
                   <span>
                     USD/m²:{" "}
                     <strong className={priceClass}>
-                      {pricePerM2 ? `USD ${pricePerM2.toLocaleString()}` : "-"}
+                      {pricePerM2 ? pricePerM2.toLocaleString() : "-"}
                     </strong>
                   </span>
                   <span>

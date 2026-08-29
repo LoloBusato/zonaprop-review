@@ -68,7 +68,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    const update: { id: string; status?: string; notes?: string } = await request.json()
+    const update: { id: string; status?: string; notes?: string; price?: number | null; area?: number | null } = await request.json()
     const { data: properties } = await getPropertiesBlob(username)
 
     const idx = properties.findIndex((p) => p.id === update.id)
@@ -81,6 +81,18 @@ export async function PATCH(request: NextRequest) {
     }
     if (update.notes !== undefined) {
       properties[idx].notes = update.notes
+    }
+    if (update.price !== undefined) {
+      properties[idx].price = update.price
+      properties[idx].pricePerM2 = update.price && properties[idx].area
+        ? Math.round(update.price / properties[idx].area)
+        : null
+    }
+    if (update.area !== undefined) {
+      properties[idx].area = update.area
+      properties[idx].pricePerM2 = properties[idx].price && update.area
+        ? Math.round(properties[idx].price / update.area)
+        : null
     }
 
     const blobName = getPropertiesBlobName(username)

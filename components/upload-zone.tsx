@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Upload, FileUp, AlertCircle, CheckCircle2, LogOut, SlidersHorizontal, Play, Loader2 } from "lucide-react"
+import { Upload, FileUp, AlertCircle, CheckCircle2, LogOut, Play, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { FiltersDialog } from "@/components/filters-dialog"
+import { FiltersInline } from "@/components/filters-inline"
 import { buildSearchUrl, type SearchFilters } from "@/lib/filters"
 
 interface UploadZoneProps {
@@ -17,7 +17,6 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [mergeInfo, setMergeInfo] = useState<string | null>(null)
-  const [filtersOpen, setFiltersOpen] = useState(false)
   const [scraperUrl, setScraperUrl] = useState<string | null>(null)
   const [scraping, setScraping] = useState(false)
   const [scraperMessage, setScraperMessage] = useState<string | null>(null)
@@ -91,7 +90,7 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
     }
   }
 
-  const handleFiltersApplied = (_filters: SearchFilters, url: string) => {
+  const handleFiltersChanged = (_filters: SearchFilters, url: string) => {
     setScraperUrl(url)
   }
 
@@ -152,8 +151,8 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
         </Button>
       </div>
 
-      <div className="w-full max-w-md space-y-6 text-center">
-        <div className="space-y-2">
+      <div className="w-full max-w-lg space-y-6">
+        <div className="space-y-2 text-center">
           <h1 className="text-2xl font-semibold text-foreground">
             ZonaProp Review
           </h1>
@@ -162,25 +161,21 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
           </p>
         </div>
 
-        {/* Action buttons */}
-        <div className="flex flex-wrap justify-center gap-2">
+        {/* Inline filters */}
+        <FiltersInline onFiltersChanged={handleFiltersChanged} />
+
+        {/* Run Scraper button */}
+        <div className="flex justify-center">
           <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setFiltersOpen(true)}
-          >
-            <SlidersHorizontal className="mr-1.5 h-4 w-4" />
-            Change Filters
-          </Button>
-          <Button
-            size="default"
+            size="lg"
             onClick={runScraper}
             disabled={scraping}
+            className="w-full"
           >
             {scraping ? (
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
             ) : (
-              <Play className="mr-1.5 h-4 w-4" />
+              <Play className="mr-2 h-5 w-5" />
             )}
             {scraping ? "Waiting for data..." : "Run Scraper"}
           </Button>
@@ -188,7 +183,7 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
 
         {/* Scraper status message */}
         {scraperMessage && (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-left text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
             {scraperMessage}
           </div>
         )}
@@ -197,7 +192,7 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
         <div className="space-y-2 rounded-lg bg-muted p-4 text-left text-xs text-muted-foreground">
           <p className="font-medium text-foreground">How it works:</p>
           <ol className="list-inside list-decimal space-y-1">
-            <li><strong>Change Filters</strong> to configure your search (barrios, price, area)</li>
+            <li>Configure your filters above</li>
             <li>Click <strong>Run Scraper</strong> — it opens ZonaProp and copies the script</li>
             <li>Paste the script in the browser console (F12 → Ctrl+V → Enter)</li>
             <li>Wait for scraping to finish — results sync back automatically</li>
@@ -206,7 +201,7 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
 
         {/* Upload zone (fallback) */}
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">Or upload a JSON file manually:</p>
+          <p className="text-xs text-center text-muted-foreground">Or upload a JSON file manually:</p>
           <div
             onDragOver={(e) => {
               e.preventDefault()
@@ -215,17 +210,17 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`cursor-pointer rounded-lg border-2 border-dashed p-8 transition-colors ${
+            className={`cursor-pointer rounded-lg border-2 border-dashed p-6 transition-colors ${
               isDragging
                 ? "border-primary bg-primary/5"
                 : "border-border hover:border-primary/50 hover:bg-muted/50"
             }`}
           >
-            <div className="flex flex-col items-center gap-3">
+            <div className="flex flex-col items-center gap-2">
               {isUploading ? (
-                <FileUp className="h-8 w-8 animate-pulse text-primary" />
+                <FileUp className="h-6 w-6 animate-pulse text-primary" />
               ) : (
-                <Upload className="h-8 w-8 text-muted-foreground" />
+                <Upload className="h-6 w-6 text-muted-foreground" />
               )}
               <p className="text-xs text-muted-foreground">
                 {isUploading ? "Uploading..." : "Drop JSON here or click to browse"}
@@ -256,12 +251,6 @@ export function UploadZone({ onUploadComplete, username, onLogout }: UploadZoneP
           </div>
         )}
       </div>
-
-      <FiltersDialog
-        open={filtersOpen}
-        onOpenChange={setFiltersOpen}
-        onFiltersApplied={handleFiltersApplied}
-      />
     </div>
   )
 }
